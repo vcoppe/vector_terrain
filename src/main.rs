@@ -1,13 +1,13 @@
 mod elevation_reader;
+mod tile_encoder;
 
 use elevation_reader::ElevationReader;
+use tile_encoder::TileEncoder;
 use pmtiles::TileCoord;
 use oxigdal_core::buffer::RasterBuffer;
 use image::{ImageBuffer, Luma};
-use oxigdal_core::types::{GeoTransform, BoundingBox};
 use oxigdal_algorithms::raster::swiss_hillshade;
 use oxigdal_algorithms::raster::polygonize::{polygonize_raster, PolygonizeOptions};
-use mercantile::{Tile, bounds};
 
 const TILE_SIZE: usize = 512;
 
@@ -53,16 +53,9 @@ async fn main() {
     }
     save_array_as_png(&hillshade, "classes.png");
 
-    // Compute bbox
-    let tile = Tile::new(coord.x() as i32, coord.y() as i32, coord.z() as i32);
-    let bbox = bounds(tile);
-    let bbox = BoundingBox::new(bbox.west, bbox.south, bbox.east, bbox.north).unwrap();
-    println!("{:?}", bbox);
-
     let mut opts = PolygonizeOptions::default();
     opts.nodata = Some(256.0);
-    opts.transform = Some(GeoTransform::from_bounds(&bbox, TILE_SIZE as u64, TILE_SIZE as u64).unwrap());
-    opts.min_area = 100.0;
+    opts.min_area = 10.0;
     let result = polygonize_raster(&hillshade, &opts).unwrap();
-    println!("nb polygons {}", result.polygons.len());
+    TileEncoder::encode(TILE_SIZE, coord, &result.polygons);
 }

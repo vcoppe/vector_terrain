@@ -2242,6 +2242,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "mercantile"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acd8c831186150b5a082ae7fde41904bfb27c612681891cca766105db780f91c"
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4038,6 +4044,7 @@ name = "vector_terrain"
 version = "0.1.0"
 dependencies = [
  "image",
+ "mercantile",
  "ndarray",
  "oxigdal-algorithms",
  "oxigdal-core",

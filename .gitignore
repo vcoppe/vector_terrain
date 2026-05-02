@@ -1,3 +1,4 @@
 /target
 *.pmtiles
 *.png
+*.json.gz

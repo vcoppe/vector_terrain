@@ -7,13 +7,11 @@ pub struct TileEncoder {}
 
 impl TileEncoder {
 
-    pub fn encode(tile_size: usize, tile_coord: TileCoord, bands: &Vec<Band>, names: &[&str; 3]) -> Result<(), Error> {
+    pub fn encode(tile_size: usize, tile_coord: TileCoord, bands: &Vec<Band>) -> Result<(), Error> {
         let mut tile = Tile::new(tile_size as u32);
         let mut layer = tile.create_layer("hillshading");
 
         for band in bands.iter() {
-            let intensity_val = band.max_v().to_string();
-            println!("{} {} {}", band.min_v(), band.max_v(), intensity_val);
             for polygon in band.geometry().iter() {
                 let mut b = GeomEncoder::new(GeomType::Polygon);
                 for coord in polygon.exterior().coords() {
@@ -27,8 +25,7 @@ impl TileEncoder {
                     b.complete_geom()?;
                 }
                 let data = b.encode()?;
-                let mut feature = layer.into_feature(data);
-                feature.add_tag_string("intensity", intensity_val.as_str());
+                let feature = layer.into_feature(data);
                 layer = feature.into_layer();
             }
         }

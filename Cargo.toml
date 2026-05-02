@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 contour = "0.13.1"
+geo-types = "0.7.19"
 image = "0.25.10"
 mercantile = "0.0.1"
 mvt = "0.13.0"

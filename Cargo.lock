@@ -4133,6 +4133,7 @@ name = "vector_terrain"
 version = "0.1.0"
 dependencies = [
  "contour",
+ "geo-types",
  "image",
  "mercantile",
  "mvt",

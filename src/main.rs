@@ -55,7 +55,7 @@ async fn main() {
         }
     }
     
-    let c = ContourBuilder::new(TILE_SIZE, TILE_SIZE, false);
+    let c = ContourBuilder::new(TILE_SIZE, TILE_SIZE, true);
     let bands = c.isobands(hillshade.as_slice().unwrap(), &THRESHOLDS).unwrap();
 
     TileEncoder::encode(TILE_SIZE, coord, &bands);

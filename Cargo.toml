@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+image = "0.25.10"
+ndarray = "0.17.2"
+oxigdal-terrain = "0.1.4"
 pmtiles = "0.23.0"
 tokio = { version = "1", features = ["full"] }
 webp = "0.3.1"

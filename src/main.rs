@@ -2,23 +2,21 @@ mod elevation_reader;
 
 use elevation_reader::ElevationReader;
 use pmtiles::TileCoord;
-use oxigdal_terrain::derivatives::hillshade::hillshade_traditional;
-use ndarray::Array2;
+use oxigdal_core::buffer::RasterBuffer;
 use image::{ImageBuffer, Luma};
+use oxigdal_algorithms::raster::swiss_hillshade;
 
-fn save_array_as_png(data: &Array2<u8>, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let (height, width) = data.dim();
-    
-    // Convert Array2 to Vec in row-major order
-    let pixels: Vec<u8> = data
-        .iter()
-        .copied()
-        .collect();
-    
-    // Create ImageBuffer (Luma = grayscale)
-    let img = ImageBuffer::<Luma<u8>, Vec<u8>>::from_raw(width as u32, height as u32, pixels)
+const TILE_SIZE: usize = 512;
+
+fn save_array_as_png(data: &RasterBuffer, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut pixels = vec![0; TILE_SIZE * TILE_SIZE];
+    for i in 0..TILE_SIZE {
+        for j in 0..TILE_SIZE {
+            pixels[i * TILE_SIZE + j] = data.get_pixel(i as u64, j as u64).unwrap() as u8;
+        }
+    }
+    let img = ImageBuffer::<Luma<u8>, Vec<u8>>::from_raw(TILE_SIZE as u32, TILE_SIZE as u32, pixels)
         .ok_or("Failed to create image buffer")?;
-    
     img.save(filename)?;
     Ok(())
 }
@@ -26,12 +24,11 @@ fn save_array_as_png(data: &Array2<u8>, filename: &str) -> Result<(), Box<dyn st
 #[tokio::main]
 async fn main() {
     let file = "planet.pmtiles";
-    let tile_size = 512;
-    let reader = ElevationReader::new(file, tile_size).await;
+    let reader = ElevationReader::new(file, TILE_SIZE).await;
     
     let coord = TileCoord::new(12, 2078, 1554).unwrap();
     let elevation = reader.get(coord).await;
-    let hillshade = hillshade_traditional(&elevation, 1.0, 215.0, 45.0, 1.0, None).unwrap();
+    let hillshade = swiss_hillshade(&elevation, 1.0, 30.0).unwrap();
     save_array_as_png(&hillshade, "hillshade.png");
     println!("{:?}", hillshade);
 }

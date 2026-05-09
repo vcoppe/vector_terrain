@@ -43,6 +43,7 @@ fn as_png(pixels: Vec<u8>, filename: &str) -> Result<(), Box<dyn std::error::Err
 async fn main() {
     let file = "planet.pmtiles";
     let reader = ElevationReader::new(file, TILE_SIZE).await;
+    let mut encoder = TileEncoder::new("example.pmtiles");
     
     let coord = TileCoord::new(12, 2078, 1554).unwrap();
     let elevation = reader.get(coord).await;
@@ -58,5 +59,7 @@ async fn main() {
     let c = ContourBuilder::new(TILE_SIZE, TILE_SIZE, true);
     let bands = c.isobands(hillshade.as_slice().unwrap(), &THRESHOLDS).unwrap();
 
-    TileEncoder::encode(TILE_SIZE, coord, &bands);
+    encoder.encode(TILE_SIZE, coord, &bands).unwrap();
+
+    encoder.finalize().unwrap();
 }

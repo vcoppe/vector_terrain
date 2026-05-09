@@ -1,5 +1,5 @@
 use mvt::{Error, GeomEncoder, GeomType, Tile};
-use pmtiles::{PmTilesWriter, TileType, TileCoord};
+use pmtiles::{PmTilesStreamWriter, PmTilesWriter, TileCoord, TileType};
 use std::fs::File;
 use contour::Band;
 use geo_types::LineString;
@@ -7,11 +7,21 @@ use geo_types::LineString;
 const EXPANSION_FACTOR: usize = 8; // to avoid snapping coordinates to the 512x512 grid
 const EXPANSION_FACTOR_FLOAT: f64 = EXPANSION_FACTOR as f64;
 
-pub struct TileEncoder {}
+pub struct TileEncoder {
+    writer: PmTilesStreamWriter<File>,
+}
 
 impl TileEncoder {
 
-    pub fn encode(tile_size: usize, tile_coord: TileCoord, bands: &Vec<Band>) -> Result<(), Error> {
+    pub fn new(path: &str) -> Self {
+        let file = File::create(path).unwrap();
+        let writer = PmTilesWriter::new(TileType::Mvt).create(file).unwrap();
+        Self {
+            writer,
+        }
+    }
+
+    pub fn encode(&mut self, tile_size: usize, tile_coord: TileCoord, bands: &Vec<Band>) -> Result<(), Error> {
         let mut tile = Tile::new((tile_size * EXPANSION_FACTOR) as u32);
         let mut layer = tile.create_layer("hillshading");
 
@@ -30,10 +40,13 @@ impl TileEncoder {
         tile.add_layer(layer)?;
         let data = tile.to_bytes()?;
 
-        let file = File::create("example.pmtiles").unwrap();
-        let mut writer = PmTilesWriter::new(TileType::Mvt).create(file).unwrap();
-        writer.add_tile(tile_coord, &data).unwrap();
-        writer.finalize().unwrap();
+        self.writer.add_tile(tile_coord, &data).inspect_err(|e| eprintln!("failed to write tile {tile_coord:?}: {e}"));
+
+        Ok(())
+    }
+
+    pub fn finalize(self) -> Result<(), Error> {
+        self.writer.finalize().inspect_err(|e| eprintln!("couldn't finalize pmtiles: {e}"));
 
         Ok(())
     }

@@ -43,7 +43,7 @@ fn as_png(pixels: Vec<u8>, filename: &str) -> Result<(), Box<dyn std::error::Err
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file = "planet.pmtiles";
     let reader = ElevationReader::new(file, TILE_SIZE).await?;
-    let mut encoder = TileEncoder::new("example.pmtiles");
+    let mut encoder = TileEncoder::new("example.pmtiles")?;
 
     let mut tiles = Box::pin(reader.iter_tiles());
     while let Some(tile_result) = tiles.next().await {

@@ -11,6 +11,7 @@ const EXPANSION_FACTOR_FLOAT: f64 = EXPANSION_FACTOR as f64;
 pub enum TileEncoderError {
     Mvt(MvtError),
     PmTiles(PmtError),
+    Io(std::io::Error),
 }
 
 impl From<MvtError> for TileEncoderError {
@@ -25,11 +26,18 @@ impl From<PmtError> for TileEncoderError {
     }
 }
 
+impl From<std::io::Error> for TileEncoderError {
+    fn from(err: std::io::Error) -> Self {
+        TileEncoderError::Io(err)
+    }
+}
+
 impl std::fmt::Display for TileEncoderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TileEncoderError::Mvt(e) => write!(f, "MVT error: {}", e),
             TileEncoderError::PmTiles(e) => write!(f, "PmTiles error: {}", e),
+            TileEncoderError::Io(e) => write!(f, "IO error: {}", e),
         }
     }
 }
@@ -42,12 +50,12 @@ pub struct TileEncoder {
 
 impl TileEncoder {
 
-    pub fn new(path: &str) -> Self {
-        let file = File::create(path).unwrap();
-        let writer = PmTilesWriter::new(TileType::Mvt).create(file).unwrap();
-        Self {
+    pub fn new(path: &str) -> Result<Self, TileEncoderError> {
+        let file = File::create(path)?;
+        let writer = PmTilesWriter::new(TileType::Mvt).create(file)?;
+        Ok(Self {
             writer,
-        }
+        })
     }
 
     pub fn encode(&mut self, tile_size: usize, tile_coord: TileCoord, bands: &Vec<Band>) -> Result<(), TileEncoderError> {

@@ -87,6 +87,8 @@ pub struct ElevationReader {
     tile_size: usize,
     padding: usize,
     offset: usize,
+    min_zoom: u8,
+    max_zoom: u8,
     reader: Arc<AsyncPmTilesReader<MmapBackend>>,
 }
 
@@ -95,12 +97,16 @@ impl ElevationReader {
         file: &str,
         tile_size: usize,
         padding: usize,
+        min_zoom: u8,
+        max_zoom: u8,
     ) -> Result<Self, ElevationReaderError> {
         let reader = AsyncPmTilesReader::new_with_path(file).await?;
         Ok(Self {
             tile_size,
             padding,
             offset: tile_size - padding,
+            min_zoom,
+            max_zoom,
             reader: Arc::new(reader),
         })
     }
@@ -110,7 +116,11 @@ impl ElevationReader {
             let mut entries = self.reader.clone().entries();
             while let Some(entry) = entries.try_next().await.map_err(ElevationReaderError::from)? {
                 for tile in entry.iter_coords() {
-                    yield Ok(tile.into());
+                    let tile = TileCoord::from(tile);
+                    if tile.z() < self.min_zoom || tile.z() > self.max_zoom {
+                        continue;
+                    }
+                    yield Ok(tile);
                 }
             }
         }

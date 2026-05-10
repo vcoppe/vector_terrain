@@ -1,6 +1,7 @@
 mod elevation_reader;
 mod tile_encoder;
 
+use clap::Parser;
 use contour::ContourBuilder;
 use futures::{StreamExt, TryStreamExt};
 use oxigdal_algorithms::raster::swiss_hillshade;
@@ -24,8 +25,29 @@ const PADDING: usize = 16;
 const THRESHOLDS: [f64; 4] = [96.0, 112.0, 140.0, 256.0];
 const FEET_TO_METER: f64 = 0.3048;
 
+/// A utility for converting a WebP terrain PMTiles file
+/// to another PMTiles file with vector hillshading and contour lines
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    /// the input PMTiles file from Mapterhorn
+    #[arg(short, long)]
+    input: String,
+    /// the output PMTiles file
+    #[arg(short, long, default_value_t = String::from("vector_terrain.pmtiles"))]
+    output: String,
+    /// ignore tiles below minimum zoom 
+    #[arg(long, default_value_t = 4)]
+    min_zoom: u8,
+    /// ignore tiles above maximum zoom 
+    #[arg(long, default_value_t = 12)]
+    max_zoom: u8,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Cli::parse();
+
     let start = Instant::now();
 
     let processed_tiles = Arc::new(AtomicU64::new(0));
@@ -53,10 +75,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    let reader = Arc::new(ElevationReader::new("planet.pmtiles", TILE_SIZE, PADDING).await?);
+    let reader = Arc::new(ElevationReader::new(
+        &args.input, TILE_SIZE, PADDING, args.min_zoom, args.max_zoom
+    ).await?);
 
     let encoder = Arc::new(tokio::sync::Mutex::new(TileEncoder::new(
-        "example.pmtiles",
+        &args.output,
         TILE_SIZE,
         PADDING,
         FEET_TO_METER,

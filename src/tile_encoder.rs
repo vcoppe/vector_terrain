@@ -1,11 +1,40 @@
-use mvt::{Error, GeomEncoder, GeomType, Tile};
-use pmtiles::{PmTilesStreamWriter, PmTilesWriter, TileCoord, TileType};
+use mvt::{Error as MvtError, GeomEncoder, GeomType, Tile};
+use pmtiles::{PmTilesStreamWriter, PmTilesWriter, TileCoord, TileType, PmtError};
 use std::fs::File;
 use contour::Band;
 use geo_types::LineString;
 
 const EXPANSION_FACTOR: usize = 8; // to avoid snapping coordinates to the 512x512 grid
 const EXPANSION_FACTOR_FLOAT: f64 = EXPANSION_FACTOR as f64;
+
+#[derive(Debug)]
+pub enum TileEncoderError {
+    Mvt(MvtError),
+    PmTiles(PmtError),
+}
+
+impl From<MvtError> for TileEncoderError {
+    fn from(err: MvtError) -> Self {
+        TileEncoderError::Mvt(err)
+    }
+}
+
+impl From<PmtError> for TileEncoderError {
+    fn from(err: PmtError) -> Self {
+        TileEncoderError::PmTiles(err)
+    }
+}
+
+impl std::fmt::Display for TileEncoderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TileEncoderError::Mvt(e) => write!(f, "MVT error: {}", e),
+            TileEncoderError::PmTiles(e) => write!(f, "PmTiles error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for TileEncoderError {}
 
 pub struct TileEncoder {
     writer: PmTilesStreamWriter<File>,
@@ -21,7 +50,7 @@ impl TileEncoder {
         }
     }
 
-    pub fn encode(&mut self, tile_size: usize, tile_coord: TileCoord, bands: &Vec<Band>) -> Result<(), Error> {
+    pub fn encode(&mut self, tile_size: usize, tile_coord: TileCoord, bands: &Vec<Band>) -> Result<(), TileEncoderError> {
         let mut tile = Tile::new((tile_size * EXPANSION_FACTOR) as u32);
         let mut layer = tile.create_layer("hillshading");
 
@@ -40,18 +69,18 @@ impl TileEncoder {
         tile.add_layer(layer)?;
         let data = tile.to_bytes()?;
 
-        self.writer.add_tile(tile_coord, &data).inspect_err(|e| eprintln!("failed to write tile {tile_coord:?}: {e}"));
+        self.writer.add_tile(tile_coord, &data)?;
 
         Ok(())
     }
 
-    pub fn finalize(self) -> Result<(), Error> {
-        self.writer.finalize().inspect_err(|e| eprintln!("couldn't finalize pmtiles: {e}"));
+    pub fn finalize(self) -> Result<(), TileEncoderError> {
+        self.writer.finalize()?;
 
         Ok(())
     }
 
-    fn add_linestring(mut encoder: GeomEncoder<f64>, line: &LineString<f64>) -> Result<GeomEncoder<f64>, Error> {
+    fn add_linestring(mut encoder: GeomEncoder<f64>, line: &LineString<f64>) -> Result<GeomEncoder<f64>, TileEncoderError> {
         for coord in line.coords() {
             encoder = encoder.point(coord.y * EXPANSION_FACTOR_FLOAT, coord.x * EXPANSION_FACTOR_FLOAT)?;
         }

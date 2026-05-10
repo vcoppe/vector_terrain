@@ -42,10 +42,10 @@ fn as_png(pixels: Vec<u8>, filename: &str) -> Result<(), Box<dyn std::error::Err
 #[tokio::main]
 async fn main() {
     let file = "planet.pmtiles";
-    let mut reader = ElevationReader::new(file, TILE_SIZE).await;
+    let reader = ElevationReader::new(file, TILE_SIZE).await;
     let mut encoder = TileEncoder::new("example.pmtiles");
 
-    let mut tiles = reader.iter_tiles();
+    let mut tiles = Box::pin(reader.iter_tiles());
     while let Some(tile) = tiles.next().await {
         let elevation = reader.get(tile).await;
         let mut hillshade = swiss_hillshade(&elevation, 1.0, 30.0).unwrap();

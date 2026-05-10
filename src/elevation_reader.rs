@@ -19,7 +19,7 @@ impl ElevationReader {
         }
     }
 
-    pub fn iter_tiles(&mut self) -> impl Stream<Item = TileCoord> {
+    pub fn iter_tiles(&self) -> impl Stream<Item = TileCoord> {
         stream! {
             let mut entries = self.reader.clone().entries();
             while let Some(entry) = entries.try_next().await.unwrap() {

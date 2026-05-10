@@ -206,6 +206,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         })
         .await;
+
+    Arc::try_unwrap(encoder)
+        .unwrap()
+        .into_inner()
+        .finalize()?;
     
     println!(
         "{:>12} tiles processed | {:>8.2} tiles/s | elapsed: {:>8.1}s",
@@ -215,11 +220,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         start.elapsed().as_secs_f64(),
     );
     println!("done");
-
-    Arc::try_unwrap(encoder)
-        .unwrap()
-        .into_inner()
-        .finalize()?;
 
     Ok(())
 }

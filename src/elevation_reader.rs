@@ -1,8 +1,8 @@
-use std::sync::Arc;
-use pmtiles::{AsyncPmTilesReader, MmapBackend, TileCoord, PmtError};
-use oxigdal_core::buffer::RasterBuffer;
-use futures::{Stream, TryStreamExt};
 use async_stream::stream;
+use futures::{Stream, TryStreamExt};
+use oxigdal_core::buffer::RasterBuffer;
+use pmtiles::{AsyncPmTilesReader, MmapBackend, PmtError, TileCoord};
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum ElevationReaderError {
@@ -36,7 +36,10 @@ pub struct ElevationBounds {
 
 impl Default for ElevationBounds {
     fn default() -> Self {
-        Self { min: f64::MAX, max: f64::MIN }
+        Self {
+            min: f64::MAX,
+            max: f64::MIN,
+        }
     }
 }
 
@@ -88,13 +91,17 @@ pub struct ElevationReader {
 }
 
 impl ElevationReader {
-    pub async fn new(file: &str, tile_size: usize, padding: usize) -> Result<Self, ElevationReaderError> {
+    pub async fn new(
+        file: &str,
+        tile_size: usize,
+        padding: usize,
+    ) -> Result<Self, ElevationReaderError> {
         let reader = AsyncPmTilesReader::new_with_path(file).await?;
         Ok(Self {
             tile_size,
             padding,
             offset: tile_size - padding,
-            reader: Arc::new(reader)
+            reader: Arc::new(reader),
         })
     }
 
@@ -109,17 +116,44 @@ impl ElevationReader {
         }
     }
 
-    pub async fn fill(&self, elevation: &mut RasterBuffer, tile: TileCoord, dy: i32, dx: i32) -> Result<ElevationBounds, ElevationReaderError> {
+    pub async fn fill(
+        &self,
+        elevation: &mut RasterBuffer,
+        tile: TileCoord,
+        dy: i32,
+        dx: i32,
+    ) -> Result<ElevationBounds, ElevationReaderError> {
         let xstart = if dx >= 0 { 0 } else { self.offset } as isize;
         let ystart = if dy >= 0 { 0 } else { self.offset } as isize;
-        let xend = if dx <= 0 { self.tile_size } else { self.padding } as isize;
-        let yend = if dy <= 0 { self.tile_size } else { self.padding } as isize;
-        let xoff = if dx == -1 { - (self.offset as isize) } else if dx == 0 { self.padding as isize } else { (self.padding + self.tile_size) as isize };
-        let yoff = if dy == -1 { - (self.offset as isize) } else if dy == 0 { self.padding as isize } else { (self.padding + self.tile_size) as isize };
+        let xend = if dx <= 0 {
+            self.tile_size
+        } else {
+            self.padding
+        } as isize;
+        let yend = if dy <= 0 {
+            self.tile_size
+        } else {
+            self.padding
+        } as isize;
+        let xoff = if dx == -1 {
+            -(self.offset as isize)
+        } else if dx == 0 {
+            self.padding as isize
+        } else {
+            (self.padding + self.tile_size) as isize
+        };
+        let yoff = if dy == -1 {
+            -(self.offset as isize)
+        } else if dy == 0 {
+            self.padding as isize
+        } else {
+            (self.padding + self.tile_size) as isize
+        };
 
-        let bytes = self.reader.get_tile(tile).await?.ok_or_else(|| {
-            ElevationReaderError::Oxigdal(format!("Tile not found: {:?}", tile))
-        });
+        let bytes =
+            self.reader.get_tile(tile).await?.ok_or_else(|| {
+                ElevationReaderError::Oxigdal(format!("Tile not found: {:?}", tile))
+            });
 
         let mut bounds = ElevationBounds::default();
 
@@ -129,11 +163,11 @@ impl ElevationReader {
             } else {
                 for x in xstart..xend {
                     for y in ystart..yend {
-                        elevation.set_pixel(
-                            (x + xoff) as u64,
-                            (y + yoff) as u64,
-                            0.0
-                        ).map_err(|_| ElevationReaderError::Oxigdal("Failed to set pixel".to_string()))?;
+                        elevation
+                            .set_pixel((x + xoff) as u64, (y + yoff) as u64, 0.0)
+                            .map_err(|_| {
+                                ElevationReaderError::Oxigdal("Failed to set pixel".to_string())
+                            })?;
                     }
                 }
 
@@ -149,12 +183,15 @@ impl ElevationReader {
             for x in xstart..xend {
                 for y in ystart..yend {
                     let i = (x * self.tile_size as isize + y) as usize;
-                    let ele = (img[3 * i] as f64) * 256.0 + img[3 * i + 1] as f64 + (img[3 * i + 2] as f64) / 256.0 - 32768 as f64;
-                    elevation.set_pixel(
-                        (x + xoff) as u64,
-                        (y + yoff) as u64,
-                        ele
-                    ).map_err(|_| ElevationReaderError::Oxigdal("Failed to set pixel".to_string()))?;
+                    let ele = (img[3 * i] as f64) * 256.0
+                        + img[3 * i + 1] as f64
+                        + (img[3 * i + 2] as f64) / 256.0
+                        - 32768 as f64;
+                    elevation
+                        .set_pixel((x + xoff) as u64, (y + yoff) as u64, ele)
+                        .map_err(|_| {
+                            ElevationReaderError::Oxigdal("Failed to set pixel".to_string())
+                        })?;
                     bounds.update(ele);
                 }
             }

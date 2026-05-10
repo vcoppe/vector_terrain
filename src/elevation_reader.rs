@@ -29,6 +29,57 @@ impl std::fmt::Display for ElevationReaderError {
 
 impl std::error::Error for ElevationReaderError {}
 
+pub struct ElevationBounds {
+    min: f64,
+    max: f64,
+}
+
+impl Default for ElevationBounds {
+    fn default() -> Self {
+        Self { min: f64::MAX, max: f64::MIN }
+    }
+}
+
+impl ElevationBounds {
+    fn update(&mut self, ele: f64) {
+        if ele < self.min {
+            self.min = ele;
+        }
+        if ele > self.max {
+            self.max = ele;
+        }
+    }
+
+    pub fn merge(&mut self, bounds: &ElevationBounds) {
+        if bounds.min < self.min {
+            self.min = bounds.min;
+        }
+        if bounds.max > self.max {
+            self.max = bounds.max;
+        }
+    }
+
+    pub fn get_thresholds(&self, step: f64) -> Vec<f64> {
+        let start = (self.min / step).ceil() * step;
+        let end = (self.max / step).floor() * step;
+
+        if start > end {
+            return Vec::new();
+        }
+
+        let mut thresholds = Vec::new();
+
+        let mut value = start;
+
+        while value <= end {
+            thresholds.push(value);
+            value += step;
+        }
+
+        thresholds
+    }
+}
+
 pub struct ElevationReader {
     tile_size: usize,
     padding: usize,
@@ -58,7 +109,7 @@ impl ElevationReader {
         }
     }
 
-    pub async fn fill(&self, elevation: &mut RasterBuffer, tile: TileCoord, dy: i32, dx: i32) -> Result<(), ElevationReaderError> {
+    pub async fn fill(&self, elevation: &mut RasterBuffer, tile: TileCoord, dy: i32, dx: i32) -> Result<ElevationBounds, ElevationReaderError> {
         let xstart = if dx >= 0 { 0 } else { self.offset } as isize;
         let ystart = if dy >= 0 { 0 } else { self.offset } as isize;
         let xend = if dx <= 0 { self.tile_size } else { self.padding } as isize;
@@ -70,9 +121,11 @@ impl ElevationReader {
             ElevationReaderError::Oxigdal(format!("Tile not found: {:?}", tile))
         });
 
+        let mut bounds = ElevationBounds::default();
+
         if bytes.is_err() {
             if dx == 0 && dy == 0 {
-                bytes.map(|_| ())
+                bytes.map(|_| bounds)
             } else {
                 for x in xstart..xend {
                     for y in ystart..yend {
@@ -84,7 +137,7 @@ impl ElevationReader {
                     }
                 }
 
-                Ok(())
+                Ok(bounds)
             }
         } else {
             let bytes = bytes.unwrap();
@@ -96,15 +149,17 @@ impl ElevationReader {
             for x in xstart..xend {
                 for y in ystart..yend {
                     let i = (x * self.tile_size as isize + y) as usize;
+                    let ele = (img[3 * i] as f64) * 256.0 + img[3 * i + 1] as f64 + (img[3 * i + 2] as f64) / 256.0 - 32768 as f64;
                     elevation.set_pixel(
                         (x + xoff) as u64,
                         (y + yoff) as u64,
-                        (img[3 * i] as f64) * 256.0 + img[3 * i + 1] as f64 + (img[3 * i + 2] as f64) / 256.0 - 32768 as f64
+                        ele
                     ).map_err(|_| ElevationReaderError::Oxigdal("Failed to set pixel".to_string()))?;
+                    bounds.update(ele);
                 }
             }
 
-            Ok(())
+            Ok(bounds)
         }
     }
 }

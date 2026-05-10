@@ -17,9 +17,12 @@ use tokio::sync::Semaphore;
 use elevation_reader::ElevationReader;
 use tile_encoder::TileEncoder;
 
+use crate::elevation_reader::ElevationBounds;
+
 const TILE_SIZE: usize = 512;
 const PADDING: usize = 16;
 const THRESHOLDS: [f64; 4] = [96.0, 112.0, 140.0, 256.0];
+const FEET_TO_METER: f64 = 0.3048;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -73,6 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "example.pmtiles",
             TILE_SIZE,
             PADDING,
+            FEET_TO_METER,
         )?,
     ));
 
@@ -109,6 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     (TILE_SIZE + 2 * PADDING) as u64,
                     RasterDataType::Float64,
                 );
+                let mut bounds = ElevationBounds::default();
 
                 for dx in -1i32..=1 {
                     for dy in -1i32..=1 {
@@ -127,22 +132,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             Err(_) => continue,
                         };
 
-                        if let Err(e) = reader
-                            .fill(
-                                &mut elevation,
-                                shifted_tile,
-                                dx,
-                                dy,
-                            )
-                            .await
-                        {
-                            eprintln!("fill error: {e}");
-                            return;
-                        }
+                        match reader
+                                .fill(
+                                    &mut elevation,
+                                    shifted_tile,
+                                    dx,
+                                    dy,
+                                )
+                                .await {
+                            Err(e) => 
+                                {
+                                    eprintln!("fill error: {e}");
+                                    return;
+                                },
+                            Ok(bnds) => bounds.merge(&bnds),
+                        };
                     }
                 }
 
-                let bands =
+                let results =
                     tokio::task::spawn_blocking(move || {
                         let mut hillshade =
                             swiss_hillshade(
@@ -174,11 +182,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             true,
                         );
 
-                        c.isobands(
+                        let contours_m = if tile.z() >= 11 {
+                            let thresholds = bounds.get_thresholds(if tile.z() == 11 { 50.0 } else { 10.0 });
+                            if thresholds.is_empty() {
+                                Vec::new()
+                            } else {
+                                c.contours(elevation.as_slice().unwrap(), &thresholds).unwrap()
+                            }
+                        } else {
+                            Vec::new()
+                        };
+
+                        let contours_ft = if tile.z() >= 11 {
+                            let thresholds = bounds.get_thresholds(if tile.z() == 11 { 200.0 * FEET_TO_METER } else { 40.0 * FEET_TO_METER });
+                            if thresholds.is_empty() {
+                                Vec::new()
+                            } else {
+                                c.contours(elevation.as_slice().unwrap(), &thresholds).unwrap()
+                            }
+                        } else {
+                            Vec::new()
+                        };
+
+                        let isobands = c.isobands(
                             hillshade.as_slice().unwrap(),
                             &THRESHOLDS,
                         )
-                        .unwrap()
+                        .unwrap();
+
+                        (contours_m, contours_ft, isobands)
                     })
                     .await
                     .unwrap();
@@ -188,7 +220,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         encoder.lock().await;
 
                     if let Err(e) =
-                        enc.encode(tile, &bands)
+                        enc.encode(tile, &results.0, &results.1, &results.2)
                     {
                         eprintln!("encode error: {e}");
                     }

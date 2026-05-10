@@ -1,7 +1,7 @@
 use mvt::{Error as MvtError, GeomEncoder, GeomType, Tile};
 use pmtiles::{PmTilesStreamWriter, PmTilesWriter, TileCoord, TileType, PmtError};
 use std::fs::File;
-use contour::Band;
+use contour::{Band, Contour};
 use geo_types::LineString;
 use std::fmt::Debug;
 
@@ -49,6 +49,7 @@ pub struct TileEncoder {
     writer: PmTilesStreamWriter<File>,
     tile_size: usize,
     padding: usize,
+    feet_to_meter: f64,
 }
 
 impl Debug for TileEncoder {
@@ -59,20 +60,68 @@ impl Debug for TileEncoder {
 
 impl TileEncoder {
 
-    pub fn new(path: &str, tile_size: usize, padding: usize) -> Result<Self, TileEncoderError> {
+    pub fn new(path: &str, tile_size: usize, padding: usize, feet_to_meter: f64) -> Result<Self, TileEncoderError> {
         let file = File::create(path)?;
         let writer = PmTilesWriter::new(TileType::Mvt).create(file)?;
         Ok(Self {
             writer,
             tile_size,
             padding,
+            feet_to_meter,
         })
     }
 
-    pub fn encode(&mut self, tile_coord: TileCoord, bands: &Vec<Band>) -> Result<(), TileEncoderError> {
+    pub fn encode(&mut self, tile_coord: TileCoord, contours_m: &Vec<Contour>, contours_ft: &Vec<Contour>, bands: &Vec<Band>) -> Result<(), TileEncoderError> {
         let mut tile = Tile::new((self.tile_size * EXPANSION_FACTOR) as u32);
-        let mut layer = tile.create_layer("hillshading");
 
+        self.encode_contours(&mut tile, contours_m, true)?;
+        self.encode_contours(&mut tile, contours_ft, false)?;
+        self.encode_hillshading(&mut tile, bands)?;
+        
+        let data = tile.to_bytes()?;
+
+        self.writer.add_tile(tile_coord, &data)?;
+
+        Ok(())
+    }
+
+    pub fn finalize(self) -> Result<(), TileEncoderError> {
+        self.writer.finalize()?;
+
+        Ok(())
+    }
+
+    fn encode_contours(&self, tile: &mut Tile, contours: &Vec<Contour>, metric: bool) -> Result<(), TileEncoderError> {
+        let mut layer = tile.create_layer(if metric { "contours_m" } else { "contours_ft" });
+
+        for contour in contours.iter() {
+            let ele = if metric { contour.threshold() } else { (contour.threshold() / self.feet_to_meter).round() } as i64;
+            for polygon in contour.geometry().iter() {
+                {
+                    let mut b = GeomEncoder::new(GeomType::Linestring);
+                    b = self.add_linestring(b, polygon.exterior())?;
+                    let data = b.encode()?;
+                    let mut feature = layer.into_feature(data);
+                    feature.add_tag_int("ele", ele);
+                    layer = feature.into_layer();
+                }
+                for interior in polygon.interiors() {
+                    let mut b = GeomEncoder::new(GeomType::Linestring);
+                    b = self.add_linestring(b, interior)?;
+                    let data = b.encode()?;
+                    let mut feature = layer.into_feature(data);
+                    feature.add_tag_int("ele", ele);
+                    layer = feature.into_layer();
+                }
+            }
+        }
+        tile.add_layer(layer)?;
+
+        Ok(())
+    }
+
+    fn encode_hillshading(&self, tile: &mut Tile, bands: &Vec<Band>) -> Result<(), TileEncoderError>  {
+        let mut layer = tile.create_layer("hillshading");
         for band in bands.iter() {
             for polygon in band.geometry().iter() {
                 let mut b = GeomEncoder::new(GeomType::Polygon);
@@ -86,15 +135,6 @@ impl TileEncoder {
             }
         }
         tile.add_layer(layer)?;
-        let data = tile.to_bytes()?;
-
-        self.writer.add_tile(tile_coord, &data)?;
-
-        Ok(())
-    }
-
-    pub fn finalize(self) -> Result<(), TileEncoderError> {
-        self.writer.finalize()?;
 
         Ok(())
     }

@@ -1,7 +1,7 @@
 mod elevation_reader;
 mod tile_encoder;
 
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use contour::ContourBuilder;
 use futures::{StreamExt, TryStreamExt};
 use oxigdal_algorithms::raster::swiss_hillshade;
@@ -36,10 +36,40 @@ struct Cli {
     /// the output PMTiles file
     #[arg(short, long, default_value_t = String::from("vector_terrain.pmtiles"))]
     output: String,
-    /// ignore tiles below minimum zoom 
+    /// compute vectorized hillshading
+    #[arg(
+        long,
+        action = ArgAction::Set,
+        default_value_t = true,
+        default_missing_value = "true",
+        num_args = 0..=1,
+        require_equals = false,
+    )]
+    hillshading: bool,
+    /// compute contour lines (meters)
+    #[arg(
+        long,
+        action = ArgAction::Set,
+        default_value_t = true,
+        default_missing_value = "true",
+        num_args = 0..=1,
+        require_equals = false,
+    )]
+    lines_m: bool,
+    /// compute contour lines (feet)
+    #[arg(
+        long,
+        action = ArgAction::Set,
+        default_value_t = true,
+        default_missing_value = "true",
+        num_args = 0..=1,
+        require_equals = false,
+    )]
+    lines_ft: bool,
+    /// ignore tiles below minimum zoom
     #[arg(long, default_value_t = 4)]
     min_zoom: u8,
-    /// ignore tiles above maximum zoom 
+    /// ignore tiles above maximum zoom
     #[arg(long, default_value_t = 12)]
     max_zoom: u8,
 }
@@ -157,7 +187,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let c =
                         ContourBuilder::new(TILE_SIZE + 2 * PADDING, TILE_SIZE + 2 * PADDING, true);
 
-                    let contours_m = if tile.z() >= 11 {
+                    let contours_m = if args.lines_m && tile.z() >= 11 {
                         let thresholds =
                             bounds.get_thresholds(if tile.z() == 11 { 50.0 } else { 10.0 });
                         if thresholds.is_empty() {
@@ -170,7 +200,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Vec::new()
                     };
 
-                    let contours_ft = if tile.z() >= 11 {
+                    let contours_ft = if args.lines_ft && tile.z() >= 11 {
                         let thresholds = bounds.get_thresholds(if tile.z() == 11 {
                             200.0 * FEET_TO_METER
                         } else {
@@ -186,9 +216,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Vec::new()
                     };
 
-                    let isobands = c
-                        .isobands(hillshade.as_slice().unwrap(), &THRESHOLDS)
-                        .unwrap();
+                    let isobands = if args.hillshading {
+                        c
+                            .isobands(hillshade.as_slice().unwrap(), &THRESHOLDS)
+                            .unwrap()
+                    } else {
+                        Vec::new()
+                    };
 
                     (contours_m, contours_ft, isobands)
                 })

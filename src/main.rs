@@ -2,6 +2,7 @@ mod elevation_reader;
 mod tile_encoder;
 
 use elevation_reader::ElevationReader;
+use pmtiles::TileCoord;
 use tile_encoder::TileEncoder;
 use oxigdal_core::buffer::RasterBuffer;
 use oxigdal_core::types::RasterDataType;
@@ -52,7 +53,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut tiles = Box::pin(reader.iter_tiles());
     while let Some(tile_result) = tiles.next().await {
         let tile = tile_result?;
-        reader.fill(&mut elevation, tile, (0, 0)).await?;
+        for dx in -1i32..=1 {
+            for dy in -1i32..=1 {
+                if tile.x() as i32 + dx < 0 || tile.y() as i32 + dy < 0 {
+                    continue;
+                }
+                let shifted_tile = TileCoord::new(tile.z(), (tile.x() as i32 + dx) as u32, (tile.y() as i32 + dy) as u32);
+                if shifted_tile.is_err() {
+                    continue;
+                }
+                reader.fill(&mut elevation, shifted_tile.unwrap(), dx, dy).await?;
+            }
+        }
         let mut hillshade = swiss_hillshade(&elevation, 1.0, 30.0)?;
         // save_buffer_as_png(&hillshade, "hillshade.png")?;
 
@@ -71,8 +83,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     encoder.finalize()?;
     
     Ok(())
-}
-
-fn process_tile() {
-
 }

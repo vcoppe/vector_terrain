@@ -3,6 +3,7 @@ use pmtiles::{PmTilesStreamWriter, PmTilesWriter, TileCoord, TileType, PmtError}
 use std::fs::File;
 use contour::Band;
 use geo_types::LineString;
+use std::fmt::Debug;
 
 const EXPANSION_FACTOR: usize = 8; // to avoid snapping coordinates to the 512x512 grid
 const EXPANSION_FACTOR_FLOAT: f64 = EXPANSION_FACTOR as f64;
@@ -48,6 +49,12 @@ pub struct TileEncoder {
     writer: PmTilesStreamWriter<File>,
     tile_size: usize,
     padding: usize,
+}
+
+impl Debug for TileEncoder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TileEncoder").field("tile_size", &self.tile_size).field("padding", &self.padding).finish()
+    }
 }
 
 impl TileEncoder {

@@ -40,14 +40,15 @@ fn as_png(pixels: Vec<u8>, filename: &str) -> Result<(), Box<dyn std::error::Err
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file = "planet.pmtiles";
-    let reader = ElevationReader::new(file, TILE_SIZE).await;
+    let reader = ElevationReader::new(file, TILE_SIZE).await?;
     let mut encoder = TileEncoder::new("example.pmtiles");
 
     let mut tiles = Box::pin(reader.iter_tiles());
-    while let Some(tile) = tiles.next().await {
-        let elevation = reader.get(tile).await;
+    while let Some(tile_result) = tiles.next().await {
+        let tile = tile_result?;
+        let elevation = reader.get(tile).await?;
         let mut hillshade = swiss_hillshade(&elevation, 1.0, 30.0).unwrap();
         // save_buffer_as_png(&hillshade, "hillshade.png");
 
@@ -60,8 +61,10 @@ async fn main() {
         let c = ContourBuilder::new(TILE_SIZE, TILE_SIZE, true);
         let bands = c.isobands(hillshade.as_slice().unwrap(), &THRESHOLDS).unwrap();
 
-        encoder.encode(TILE_SIZE, tile, &bands).unwrap();
+        encoder.encode(TILE_SIZE, tile, &bands)?;
     }
 
-    encoder.finalize().unwrap();
+    encoder.finalize()?;
+    
+    Ok(())
 }

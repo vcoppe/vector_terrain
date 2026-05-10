@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use pmtiles::{AsyncPmTilesReader, MmapBackend, TileCoord, PmtError};
 use oxigdal_core::buffer::RasterBuffer;
-use oxigdal_core::types::RasterDataType;
 use futures::{Stream, TryStreamExt};
 use async_stream::stream;
 
@@ -32,14 +31,18 @@ impl std::error::Error for ElevationReaderError {}
 
 pub struct ElevationReader {
     tile_size: usize,
+    padding: usize,
+    offset: usize,
     reader: Arc<AsyncPmTilesReader<MmapBackend>>,
 }
 
 impl ElevationReader {
-    pub async fn new(file: &str, tile_size: usize) -> Result<Self, ElevationReaderError> {
+    pub async fn new(file: &str, tile_size: usize, padding: usize) -> Result<Self, ElevationReaderError> {
         let reader = AsyncPmTilesReader::new_with_path(file).await?;
         Ok(Self {
             tile_size,
+            padding,
+            offset: tile_size - padding,
             reader: Arc::new(reader)
         })
     }
@@ -55,7 +58,7 @@ impl ElevationReader {
         }
     }
 
-    pub async fn get(&self, tile: TileCoord) -> Result<RasterBuffer, ElevationReaderError> {
+    pub async fn fill(&self, elevation: &mut RasterBuffer, tile: TileCoord, position: (isize, isize)) -> Result<(), ElevationReaderError> {
         let bytes = self.reader.get_tile(tile).await?.ok_or_else(|| {
             ElevationReaderError::Oxigdal(format!("Tile not found: {:?}", tile))
         })?;
@@ -63,14 +66,27 @@ impl ElevationReader {
         let img = decoder.decode().ok_or_else(|| {
             ElevationReaderError::WebP("Failed to decode WebP image".to_string())
         })?;
-        let mut elevation = RasterBuffer::zeros(self.tile_size as u64, self.tile_size as u64, RasterDataType::Float64);
-        for i in 0..(self.tile_size * self.tile_size) {
-            elevation.set_pixel(
-                (i / self.tile_size) as u64,
-                (i % self.tile_size) as u64,
-                (img[3 * i] as f64) * 256.0 + img[3 * i + 1] as f64 + (img[3 * i + 2] as f64) / 256.0 - 32768 as f64
-            ).map_err(|_| ElevationReaderError::Oxigdal("Failed to set pixel".to_string()))?;
+
+        let (dx, dy) = position;
+
+        let xstart = if dx >= 0 { 0 } else { self.offset };
+        let ystart = if dy >= 0 { 0 } else { self.offset };
+        let xend = if dx == 0 { self.tile_size } else { self.padding };
+        let yend = if dy == 0 { self.tile_size } else { self.padding };
+        let xoff = if dx == -1 { 0 } else if dx == 0 { self.padding } else { self.padding + self.tile_size };
+        let yoff = if dy == -1 { 0 } else if dy == 0 { self.padding } else { self.padding + self.tile_size };
+
+        for x in xstart..xend {
+            for y in ystart..yend {
+                let i = x * self.tile_size + y;
+                elevation.set_pixel(
+                    (x + xoff) as u64,
+                    (y + yoff) as u64,
+                    (img[3 * i] as f64) * 256.0 + img[3 * i + 1] as f64 + (img[3 * i + 2] as f64) / 256.0 - 32768 as f64
+                ).map_err(|_| ElevationReaderError::Oxigdal("Failed to set pixel".to_string()))?;
+            }
         }
-        Ok(elevation)
+
+        Ok(())
     }
 }

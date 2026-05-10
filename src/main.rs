@@ -72,6 +72,9 @@ struct Cli {
     /// ignore tiles above maximum zoom
     #[arg(long, default_value_t = 12)]
     max_zoom: u8,
+    /// max number of threads
+    #[arg(short, long, default_value_t = num_cpus::get())]
+    threads: usize,
 }
 
 #[tokio::main]
@@ -116,15 +119,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         FEET_TO_METER,
     )?));
 
-    let concurrency = num_cpus::get();
-
-    let semaphore = Arc::new(Semaphore::new(concurrency));
+    let semaphore = Arc::new(Semaphore::new(args.threads));
 
     let tiles = reader.iter_tiles();
 
     tiles
         .map_err(|e| Box::<dyn std::error::Error>::from(e))
-        .for_each_concurrent(concurrency, |tile_result| {
+        .for_each_concurrent(args.threads, |tile_result| {
             let reader = reader.clone();
             let encoder = encoder.clone();
             let semaphore = semaphore.clone();

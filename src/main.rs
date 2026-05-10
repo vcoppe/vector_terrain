@@ -16,7 +16,7 @@ fn save_buffer_as_png(data: &RasterBuffer, filename: &str) -> Result<(), Box<dyn
     let mut pixels = vec![0; TILE_SIZE * TILE_SIZE];
     for i in 0..TILE_SIZE {
         for j in 0..TILE_SIZE {
-            pixels[i * TILE_SIZE + j] = data.get_pixel(i as u64, j as u64).unwrap() as u8;
+            pixels[i * TILE_SIZE + j] = data.get_pixel(i as u64, j as u64)? as u8;
         }
     }
     as_png(pixels, filename)
@@ -49,17 +49,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(tile_result) = tiles.next().await {
         let tile = tile_result?;
         let elevation = reader.get(tile).await?;
-        let mut hillshade = swiss_hillshade(&elevation, 1.0, 30.0).unwrap();
+        let mut hillshade = swiss_hillshade(&elevation, 1.0, 30.0)?;
         // save_buffer_as_png(&hillshade, "hillshade.png");
 
         for i in 0..TILE_SIZE {
             for j in 0..TILE_SIZE {
-                hillshade.set_pixel(i as u64, j as u64, 255.0 - hillshade.get_pixel(i as u64, j as u64).unwrap());
+                hillshade.set_pixel(i as u64, j as u64, 255.0 - hillshade.get_pixel(i as u64, j as u64)?)?;
             }
         }
         
         let c = ContourBuilder::new(TILE_SIZE, TILE_SIZE, true);
-        let bands = c.isobands(hillshade.as_slice().unwrap(), &THRESHOLDS).unwrap();
+        let bands = c.isobands(hillshade.as_slice()?, &THRESHOLDS)?;
 
         encoder.encode(TILE_SIZE, tile, &bands)?;
     }

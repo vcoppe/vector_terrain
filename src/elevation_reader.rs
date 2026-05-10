@@ -1,22 +1,36 @@
+use std::sync::Arc;
 use pmtiles::{AsyncPmTilesReader, MmapBackend, TileCoord};
 use webp::Decoder;
 use oxigdal_core::buffer::RasterBuffer;
 use oxigdal_core::types::RasterDataType;
+use futures::{Stream, TryStreamExt};
+use async_stream::stream;
 
 pub struct ElevationReader {
     tile_size: usize,
-    reader: AsyncPmTilesReader<MmapBackend>,
+    reader: Arc<AsyncPmTilesReader<MmapBackend>>,
 }
 
 impl ElevationReader {
     pub async fn new(file: &str, tile_size: usize) -> Self {
         Self {
             tile_size,
-            reader: AsyncPmTilesReader::new_with_path(file).await.unwrap()
+            reader: Arc::new(AsyncPmTilesReader::new_with_path(file).await.unwrap())
         }
     }
 
-    pub async fn get(self, coord: TileCoord) -> RasterBuffer {
+    pub fn iter_tiles(&mut self) -> impl Stream<Item = TileCoord> {
+        stream! {
+            let mut entries = self.reader.clone().entries();
+            while let Some(entry) = entries.try_next().await.unwrap() {
+                for tile_coord in entry.iter_coords() {
+                    yield tile_coord.into();
+                }
+            }
+        }
+    }
+
+    pub async fn get(&self, coord: TileCoord) -> RasterBuffer {
         let bytes = self.reader.get_tile(coord).await.unwrap().unwrap();
         let decoder = Decoder::new(&bytes);
         let img = decoder.decode().unwrap();

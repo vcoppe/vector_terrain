@@ -3,11 +3,11 @@ mod tile_encoder;
 
 use elevation_reader::ElevationReader;
 use tile_encoder::TileEncoder;
-use pmtiles::TileCoord;
 use oxigdal_core::buffer::RasterBuffer;
 use image::{ImageBuffer, Luma};
 use oxigdal_algorithms::raster::swiss_hillshade;
 use contour::ContourBuilder;
+use futures::StreamExt;
 
 const TILE_SIZE: usize = 512;
 const THRESHOLDS:  [f64; 4] = [96.0, 112.0, 140.0, 256.0];
@@ -42,24 +42,26 @@ fn as_png(pixels: Vec<u8>, filename: &str) -> Result<(), Box<dyn std::error::Err
 #[tokio::main]
 async fn main() {
     let file = "planet.pmtiles";
-    let reader = ElevationReader::new(file, TILE_SIZE).await;
+    let mut reader = ElevationReader::new(file, TILE_SIZE).await;
     let mut encoder = TileEncoder::new("example.pmtiles");
-    
-    let coord = TileCoord::new(12, 2078, 1554).unwrap();
-    let elevation = reader.get(coord).await;
-    let mut hillshade = swiss_hillshade(&elevation, 1.0, 30.0).unwrap();
-    // save_buffer_as_png(&hillshade, "hillshade.png");
 
-    for i in 0..TILE_SIZE {
-        for j in 0..TILE_SIZE {
-            hillshade.set_pixel(i as u64, j as u64, 255.0 - hillshade.get_pixel(i as u64, j as u64).unwrap());
+    let mut tiles = reader.iter_tiles();
+    while let Some(tile) = tiles.next().await {
+        let elevation = reader.get(tile).await;
+        let mut hillshade = swiss_hillshade(&elevation, 1.0, 30.0).unwrap();
+        // save_buffer_as_png(&hillshade, "hillshade.png");
+
+        for i in 0..TILE_SIZE {
+            for j in 0..TILE_SIZE {
+                hillshade.set_pixel(i as u64, j as u64, 255.0 - hillshade.get_pixel(i as u64, j as u64).unwrap());
+            }
         }
-    }
-    
-    let c = ContourBuilder::new(TILE_SIZE, TILE_SIZE, true);
-    let bands = c.isobands(hillshade.as_slice().unwrap(), &THRESHOLDS).unwrap();
+        
+        let c = ContourBuilder::new(TILE_SIZE, TILE_SIZE, true);
+        let bands = c.isobands(hillshade.as_slice().unwrap(), &THRESHOLDS).unwrap();
 
-    encoder.encode(TILE_SIZE, coord, &bands).unwrap();
+        encoder.encode(TILE_SIZE, tile, &bands).unwrap();
+    }
 
     encoder.finalize().unwrap();
 }

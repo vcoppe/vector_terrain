@@ -82,7 +82,7 @@ impl TileEncoder {
         contours_ft: &Vec<Contour>,
         bands: &Vec<Band>,
     ) -> Result<(), TileEncoderError> {
-        let expansion_factor = if tile_coord.z() < 12 { 2 } else { 4 };
+        let expansion_factor = if tile_coord.z() < 12 { 2 } else { 8 };
         let mut tile = Tile::new((self.tile_size * expansion_factor) as u32);
         let expansion_factor = expansion_factor as f64;
 

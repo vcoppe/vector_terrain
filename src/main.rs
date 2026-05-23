@@ -36,9 +36,6 @@ struct Cli {
     /// the input PMTiles file from Mapterhorn
     #[arg(short, long)]
     input: String,
-    /// the output PMTiles file
-    #[arg(short, long, default_value_t = String::from("vector_terrain.pmtiles"))]
-    output: String,
     /// compute vectorized hillshading
     #[arg(long, default_value_t = false)]
     hillshading: bool,
@@ -127,12 +124,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &args.input, TILE_SIZE, PADDING, args.min_zoom, args.max_zoom
     ).await?);
 
-    let encoder = Arc::new(tokio::sync::Mutex::new(TileEncoder::new(
-        &args.output,
-        TILE_SIZE,
-        PADDING,
-        FEET_TO_METER,
-    )?));
+    let hillshading_encoder = if args.hillshading {
+        Some(Arc::new(tokio::sync::Mutex::new(TileEncoder::new(
+            "hillshading.pmtiles",
+            TILE_SIZE,
+            PADDING,
+            FEET_TO_METER,
+            true,
+        )?)))
+    } else {
+        None
+    };
+
+    let contours_m_encoder = if args.contours_m {
+        Some(Arc::new(tokio::sync::Mutex::new(TileEncoder::new(
+            "contours_m.pmtiles",
+            TILE_SIZE,
+            PADDING,
+            FEET_TO_METER,
+            false,
+        )?)))
+    } else {
+        None
+    };
+
+    let contours_ft_encoder = if args.contours_ft {
+        Some(Arc::new(tokio::sync::Mutex::new(TileEncoder::new(
+            "contours_ft.pmtiles",
+            TILE_SIZE,
+            PADDING,
+            FEET_TO_METER,
+            false,
+        )?)))
+    } else {
+        None
+    };
 
     let semaphore = Arc::new(Semaphore::new(args.threads));
 
@@ -142,7 +168,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| Box::<dyn std::error::Error>::from(e))
         .for_each_concurrent(args.threads, |tile_result| {
             let reader = reader.clone();
-            let encoder = encoder.clone();
+            let hillshading_encoder = hillshading_encoder.clone();
+            let contours_m_encoder = contours_m_encoder.clone();
+            let contours_ft_encoder = contours_ft_encoder.clone();
             let semaphore = semaphore.clone();
             let processed_tiles = processed_tiles.clone();
 
@@ -222,7 +250,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Vec::new()
                     };
 
-                    let isobands = if args.hillshading {
+                    let hillshading = if args.hillshading {
                         let lat = ul(Tile::new(tile.x() as i32, tile.y() as i32, tile.z() as i32)).lat;
                         let pixel_size = 40075016.686 / (TILE_SIZE as f64) * lat.to_radians().cos() / 2f64.powf(tile.z() as f64);
                         let mut hillshade = swiss_hillshade(&elevation, 1.0, pixel_size).unwrap();
@@ -255,15 +283,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Vec::new()
                     };
 
-                    (contours_m, contours_ft, isobands)
+                    (hillshading, contours_m, contours_ft)
                 })
                 .await
                 .unwrap();
 
-                {
+                if let Some(encoder) = &hillshading_encoder {
+                    let mut enc: tokio::sync::MutexGuard<'_, TileEncoder> = encoder.lock().await;
+
+                    if let Err(e) = enc.encode(tile, &results.0) {
+                        eprintln!("encode error: {e}");
+                    }
+                }
+
+                if let Some(encoder) = &contours_m_encoder {
                     let mut enc = encoder.lock().await;
 
-                    if let Err(e) = enc.encode(tile, &results.0, &results.1, &results.2) {
+                    if let Err(e) = enc.encode(tile, &results.1) {
+                        eprintln!("encode error: {e}");
+                    }
+                }
+
+                if let Some(encoder) = &contours_ft_encoder {
+                    let mut enc = encoder.lock().await;
+
+                    if let Err(e) = enc.encode(tile, &results.2) {
                         eprintln!("encode error: {e}");
                     }
                 }
@@ -275,7 +319,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await;
 
-    Arc::try_unwrap(encoder).unwrap().into_inner().finalize()?;
+    for encoder in [hillshading_encoder, contours_m_encoder, contours_ft_encoder] {
+        if let Some(encoder) = encoder {
+            Arc::try_unwrap(encoder).unwrap().into_inner().finalize()?;
+        }
+    }
 
     println!(
         "{:>12} tiles processed | {:>8.2} tiles/s | elapsed: {:>8.1}s",

@@ -48,6 +48,7 @@ pub struct TileEncoder {
     tile_size: usize,
     padding: usize,
     feet_to_meter: f64,
+    hillshading: bool,
 }
 
 impl Debug for TileEncoder {
@@ -65,6 +66,7 @@ impl TileEncoder {
         tile_size: usize,
         padding: usize,
         feet_to_meter: f64,
+        hillshading: bool,
     ) -> Result<Self, TileEncoderError> {
         let file = File::create(path)?;
         let writer = PmTilesWriter::new(TileType::Mvt).create(file)?;
@@ -73,23 +75,24 @@ impl TileEncoder {
             tile_size,
             padding,
             feet_to_meter,
+            hillshading,
         })
     }
 
     pub fn encode(
         &mut self,
         tile_coord: TileCoord,
-        contours_m: &Vec<Contour>,
-        contours_ft: &Vec<Contour>,
-        bands: &Vec<Contour>,
+        contours: &Vec<Contour>,
     ) -> Result<(), TileEncoderError> {
         let expansion_factor = if tile_coord.z() < 12 { 2 } else { 8 };
         let mut tile = Tile::new((self.tile_size * expansion_factor) as u32);
         let expansion_factor = expansion_factor as f64;
 
-        self.encode_contours(&mut tile, contours_m, true, expansion_factor)?;
-        self.encode_contours(&mut tile, contours_ft, false, expansion_factor)?;
-        self.encode_hillshading(&mut tile, bands, expansion_factor)?;
+        if self.hillshading {
+            self.encode_hillshading(&mut tile, contours, expansion_factor)?;
+        } else {
+            self.encode_contours(&mut tile, contours, true, expansion_factor)?;
+        }
 
         let data = tile.to_bytes()?;
 

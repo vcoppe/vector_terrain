@@ -1,7 +1,7 @@
 mod elevation_reader;
 mod tile_encoder;
 
-use clap::{ArgAction, Parser};
+use clap::Parser;
 use contour::ContourBuilder;
 use futures::{StreamExt, TryStreamExt};
 use image::{ImageBuffer, Luma};
@@ -40,35 +40,14 @@ struct Cli {
     #[arg(short, long, default_value_t = String::from("vector_terrain.pmtiles"))]
     output: String,
     /// compute vectorized hillshading
-    #[arg(
-        long,
-        action = ArgAction::Set,
-        default_value_t = true,
-        default_missing_value = "true",
-        num_args = 0..=1,
-        require_equals = false,
-    )]
+    #[arg(long, default_value_t = false)]
     hillshading: bool,
     /// compute contour lines (meters)
-    #[arg(
-        long,
-        action = ArgAction::Set,
-        default_value_t = true,
-        default_missing_value = "true",
-        num_args = 0..=1,
-        require_equals = false,
-    )]
-    lines_m: bool,
+    #[arg(long, default_value_t = false)]
+    contours_m: bool,
     /// compute contour lines (feet)
-    #[arg(
-        long,
-        action = ArgAction::Set,
-        default_value_t = true,
-        default_missing_value = "true",
-        num_args = 0..=1,
-        require_equals = false,
-    )]
-    lines_ft: bool,
+    #[arg(long, default_value_t = false)]
+    contours_ft: bool,
     /// ignore tiles below minimum zoom
     #[arg(long, default_value_t = 4)]
     min_zoom: u8,
@@ -214,7 +193,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let c =
                         ContourBuilder::new(TILE_SIZE + 2 * PADDING, TILE_SIZE + 2 * PADDING, true);
 
-                    let contours_m = if args.lines_m && tile.z() >= 11 {
+                    let contours_m = if args.contours_m && tile.z() >= 11 {
                         let thresholds =
                             bounds.get_thresholds(if tile.z() == 11 { 100.0 } else { 10.0 });
                         if thresholds.is_empty() {
@@ -227,7 +206,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Vec::new()
                     };
 
-                    let contours_ft = if args.lines_ft && tile.z() >= 11 {
+                    let contours_ft = if args.contours_ft && tile.z() >= 11 {
                         let thresholds = bounds.get_thresholds(if tile.z() == 11 {
                             400.0 * FEET_TO_METER
                         } else {

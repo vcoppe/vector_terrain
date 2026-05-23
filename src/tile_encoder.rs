@@ -1,4 +1,5 @@
 use contour::{Band, Contour};
+use either::Either;
 use geo_types::LineString;
 use mvt::{Error as MvtError, GeomEncoder, GeomType, Tile};
 use pmtiles::{PmTilesStreamWriter, PmTilesWriter, PmtError, TileCoord, TileType};
@@ -121,7 +122,7 @@ impl TileEncoder {
             for polygon in contour.geometry().iter() {
                 {
                     let mut b = GeomEncoder::new(GeomType::Linestring);
-                    b = self.add_linestring(b, polygon.exterior(), expansion_factor)?;
+                    b = self.add_linestring(b, polygon.exterior(), expansion_factor, true)?;
                     let data = b.encode()?;
                     let mut feature = layer.into_feature(data);
                     feature.add_tag_int("ele", ele);
@@ -129,7 +130,7 @@ impl TileEncoder {
                 }
                 for interior in polygon.interiors() {
                     let mut b = GeomEncoder::new(GeomType::Linestring);
-                    b = self.add_linestring(b, interior, expansion_factor)?;
+                    b = self.add_linestring(b, interior, expansion_factor, true)?;
                     let data = b.encode()?;
                     let mut feature = layer.into_feature(data);
                     feature.add_tag_int("ele", ele);
@@ -152,9 +153,9 @@ impl TileEncoder {
         for band in bands.iter() {
             for polygon in band.geometry().iter() {
                 let mut b = GeomEncoder::new(GeomType::Polygon);
-                b = self.add_linestring(b, polygon.exterior(), expansion_factor)?;
+                b = self.add_linestring(b, polygon.exterior(), expansion_factor, true)?;
                 for interior in polygon.interiors() {
-                    b = self.add_linestring(b, interior, expansion_factor)?;
+                    b = self.add_linestring(b, interior, expansion_factor, false)?;
                 }
                 let data = b.encode()?;
                 let feature = layer.into_feature(data);
@@ -171,9 +172,21 @@ impl TileEncoder {
         mut encoder: GeomEncoder<f64>,
         line: &LineString<f64>,
         expansion_factor: f64,
+        outer: bool,
     ) -> Result<GeomEncoder<f64>, TileEncoderError> {
+        let coords: Vec<_> = line.coords().collect();
+        let mut signed_area = 0.0;
+        for i in 0..coords.len() {
+            let j = (i + 1) % coords.len();
+            signed_area += (coords[j].x - coords[i].x) * (coords[j].y + coords[i].y);
+        }
+        let iter = if outer == (signed_area >= 0.0) {
+            Either::Left(line.coords())
+        } else {
+            Either::Right(line.coords().rev())
+        };
         let mut last: Option<(f64, f64)> = None;
-        for coord in line.coords() {
+        for coord in iter {
             let cur = (
                 ((coord.y - self.padding as f64) * expansion_factor).round(),
                 ((coord.x - self.padding as f64) * expansion_factor).round()

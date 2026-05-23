@@ -195,7 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let contours_m = if args.contours_m && tile.z() >= 11 {
                         let thresholds =
-                            bounds.get_thresholds(if tile.z() == 11 { 100.0 } else { 10.0 });
+                            bounds.get_thresholds(if tile.z() == 11 { 100.0 } else { 25.0 });
                         if thresholds.is_empty() {
                             Vec::new()
                         } else {
@@ -210,7 +210,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let thresholds = bounds.get_thresholds(if tile.z() == 11 {
                             400.0 * FEET_TO_METER
                         } else {
-                            40.0 * FEET_TO_METER
+                            100.0 * FEET_TO_METER
                         });
                         if thresholds.is_empty() {
                             Vec::new()

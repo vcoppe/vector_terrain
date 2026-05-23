@@ -5,9 +5,6 @@ use pmtiles::{PmTilesStreamWriter, PmTilesWriter, PmtError, TileCoord, TileType}
 use std::fmt::Debug;
 use std::fs::File;
 
-const EXPANSION_FACTOR: usize = 8; // to avoid snapping coordinates to the 512x512 grid
-const EXPANSION_FACTOR_FLOAT: f64 = EXPANSION_FACTOR as f64;
-
 #[derive(Debug)]
 pub enum TileEncoderError {
     Mvt(MvtError),
@@ -85,11 +82,13 @@ impl TileEncoder {
         contours_ft: &Vec<Contour>,
         bands: &Vec<Band>,
     ) -> Result<(), TileEncoderError> {
-        let mut tile = Tile::new((self.tile_size * EXPANSION_FACTOR) as u32);
+        let expansion_factor = if tile_coord.z() < 12 { 2 } else { 4 };
+        let mut tile = Tile::new((self.tile_size * expansion_factor) as u32);
+        let expansion_factor = expansion_factor as f64;
 
-        self.encode_contours(&mut tile, contours_m, true)?;
-        self.encode_contours(&mut tile, contours_ft, false)?;
-        self.encode_hillshading(&mut tile, bands)?;
+        self.encode_contours(&mut tile, contours_m, true, expansion_factor)?;
+        self.encode_contours(&mut tile, contours_ft, false, expansion_factor)?;
+        self.encode_hillshading(&mut tile, bands, expansion_factor)?;
 
         let data = tile.to_bytes()?;
 
@@ -109,6 +108,7 @@ impl TileEncoder {
         tile: &mut Tile,
         contours: &Vec<Contour>,
         metric: bool,
+        expansion_factor: f64,
     ) -> Result<(), TileEncoderError> {
         let mut layer = tile.create_layer(if metric { "contours_m" } else { "contours_ft" });
 
@@ -121,7 +121,7 @@ impl TileEncoder {
             for polygon in contour.geometry().iter() {
                 {
                     let mut b = GeomEncoder::new(GeomType::Linestring);
-                    b = self.add_linestring(b, polygon.exterior())?;
+                    b = self.add_linestring(b, polygon.exterior(), expansion_factor)?;
                     let data = b.encode()?;
                     let mut feature = layer.into_feature(data);
                     feature.add_tag_int("ele", ele);
@@ -129,7 +129,7 @@ impl TileEncoder {
                 }
                 for interior in polygon.interiors() {
                     let mut b = GeomEncoder::new(GeomType::Linestring);
-                    b = self.add_linestring(b, interior)?;
+                    b = self.add_linestring(b, interior, expansion_factor)?;
                     let data = b.encode()?;
                     let mut feature = layer.into_feature(data);
                     feature.add_tag_int("ele", ele);
@@ -146,14 +146,15 @@ impl TileEncoder {
         &self,
         tile: &mut Tile,
         bands: &Vec<Band>,
+        expansion_factor: f64,
     ) -> Result<(), TileEncoderError> {
         let mut layer = tile.create_layer("hillshading");
         for band in bands.iter() {
             for polygon in band.geometry().iter() {
                 let mut b = GeomEncoder::new(GeomType::Polygon);
-                b = self.add_linestring(b, polygon.exterior())?;
+                b = self.add_linestring(b, polygon.exterior(), expansion_factor)?;
                 for interior in polygon.interiors() {
-                    b = self.add_linestring(b, interior)?;
+                    b = self.add_linestring(b, interior, expansion_factor)?;
                 }
                 let data = b.encode()?;
                 let feature = layer.into_feature(data);
@@ -169,12 +170,19 @@ impl TileEncoder {
         &self,
         mut encoder: GeomEncoder<f64>,
         line: &LineString<f64>,
+        expansion_factor: f64,
     ) -> Result<GeomEncoder<f64>, TileEncoderError> {
+        let mut last: Option<(f64, f64)> = None;
         for coord in line.coords() {
-            encoder = encoder.point(
-                (coord.y - self.padding as f64) * EXPANSION_FACTOR_FLOAT,
-                (coord.x - self.padding as f64) * EXPANSION_FACTOR_FLOAT,
-            )?;
+            let cur = (
+                ((coord.y - self.padding as f64) * expansion_factor).round(),
+                ((coord.x - self.padding as f64) * expansion_factor).round()
+            );
+            if last.is_some_and(|l| l == cur) {
+                continue;
+            }
+            encoder = encoder.point(cur.0, cur.1)?;
+            last = Some(cur);
         }
         encoder.complete_geom()?;
         Ok(encoder)

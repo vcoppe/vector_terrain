@@ -174,11 +174,9 @@ impl TileEncoder {
         expansion_factor: f64,
         outer: bool,
     ) -> Result<GeomEncoder<f64>, TileEncoderError> {
-        let coords: Vec<_> = line.coords().collect();
         let mut signed_area = 0.0;
-        for i in 0..coords.len() {
-            let j = (i + 1) % coords.len();
-            signed_area += (coords[j].x - coords[i].x) * (coords[j].y + coords[i].y);
+        for segment in line.lines() {
+            signed_area += (segment.end.x - segment.start.x) * (segment.end.y + segment.start.y);
         }
         let iter = if outer == (signed_area >= 0.0) {
             Either::Left(line.coords())

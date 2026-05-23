@@ -1,4 +1,4 @@
-use contour::{Band, Contour};
+use contour::Contour;
 use either::Either;
 use geo_types::LineString;
 use mvt::{Error as MvtError, GeomEncoder, GeomType, Tile};
@@ -81,7 +81,7 @@ impl TileEncoder {
         tile_coord: TileCoord,
         contours_m: &Vec<Contour>,
         contours_ft: &Vec<Contour>,
-        bands: &Vec<Band>,
+        bands: &Vec<Contour>,
     ) -> Result<(), TileEncoderError> {
         let expansion_factor = if tile_coord.z() < 12 { 2 } else { 8 };
         let mut tile = Tile::new((self.tile_size * expansion_factor) as u32);
@@ -146,7 +146,7 @@ impl TileEncoder {
     fn encode_hillshading(
         &self,
         tile: &mut Tile,
-        bands: &Vec<Band>,
+        bands: &Vec<Contour>,
         expansion_factor: f64,
     ) -> Result<(), TileEncoderError> {
         let mut layer = tile.create_layer("hillshading");

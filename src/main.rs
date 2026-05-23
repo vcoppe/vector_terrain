@@ -24,8 +24,8 @@ use crate::elevation_reader::ElevationBounds;
 
 const TILE_SIZE: usize = 512;
 const PADDING: usize = 16;
-const THRESHOLDS: [f64; 4] = [112.0, 144.0, 176.0, 256.0];
-const COLORS:  [u8; 4] = [255, 224, 160, 128];
+const THRESHOLDS: [f64; 3] = [112.0, 144.0, 176.0];
+const COLORS:  [u8; 3] = [224, 160, 128];
 const FEET_TO_METER: f64 = 0.3048;
 
 /// A utility for converting a WebP terrain PMTiles file
@@ -101,12 +101,12 @@ fn as_png(pixels: Vec<u8>, size: u32, filename: &str) -> Result<(), Box<dyn std:
 }
 
 fn get_color(value: f64) -> u8 {
-    for (i, t) in THRESHOLDS.iter().enumerate() {
-        if value <= *t {
+    for (i, t) in THRESHOLDS.iter().enumerate().rev() {
+        if value >= *t {
             return COLORS[i];
         }
     }
-    0
+    255
 }
 
 #[tokio::main]
@@ -270,7 +270,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
 
                         c
-                            .isobands(hillshade.as_slice().unwrap(), &THRESHOLDS)
+                            .contours(hillshade.as_slice().unwrap(), &THRESHOLDS)
                             .unwrap()
                     } else {
                         Vec::new()

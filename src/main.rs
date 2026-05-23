@@ -4,14 +4,16 @@ mod tile_encoder;
 use clap::{ArgAction, Parser};
 use contour::ContourBuilder;
 use futures::{StreamExt, TryStreamExt};
+use image::{ImageBuffer, Luma};
+use mercantile::{Tile, ul};
 use oxigdal_algorithms::raster::swiss_hillshade;
 use oxigdal_core::buffer::RasterBuffer;
 use oxigdal_core::types::RasterDataType;
 use pmtiles::TileCoord;
-use std::sync::{
+use std::{fs::create_dir_all, sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
-};
+}};
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
@@ -22,7 +24,8 @@ use crate::elevation_reader::ElevationBounds;
 
 const TILE_SIZE: usize = 512;
 const PADDING: usize = 16;
-const THRESHOLDS: [f64; 4] = [96.0, 112.0, 140.0, 256.0];
+const THRESHOLDS: [f64; 4] = [112.0, 144.0, 176.0, 256.0];
+const COLORS:  [u8; 4] = [255, 224, 160, 128];
 const FEET_TO_METER: f64 = 0.3048;
 
 /// A utility for converting a WebP terrain PMTiles file
@@ -75,11 +78,44 @@ struct Cli {
     /// max number of threads
     #[arg(short, long, default_value_t = num_cpus::get())]
     threads: usize,
+    /// output PNGs for debugging
+    #[arg(long, default_value_t = false)]
+    debug: bool,
+}
+
+fn save_buffer_as_png(data: &RasterBuffer, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut pixels = vec![0; (data.height() * data.width()) as usize];
+    for i in 0..data.height() {
+        for j in 0..data.width() {
+            pixels[(i * data.width() + j) as usize] = data.get_pixel(i, j)? as u8;
+        }
+    }
+    as_png(pixels, data.width() as u32, filename)
+}
+
+fn as_png(pixels: Vec<u8>, size: u32, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let img = ImageBuffer::<Luma<u8>, Vec<u8>>::from_raw(size, size, pixels)
+        .ok_or("Failed to create image buffer")?;
+    img.save(filename)?;
+    Ok(())
+}
+
+fn get_color(value: f64) -> u8 {
+    for (i, t) in THRESHOLDS.iter().enumerate() {
+        if value <= *t {
+            return COLORS[i];
+        }
+    }
+    0
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Cli::parse();
+
+    if args.debug {
+        create_dir_all("debug")?;
+    }
 
     let start = Instant::now();
 
@@ -175,22 +211,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 let results = tokio::task::spawn_blocking(move || {
-                    let mut hillshade = swiss_hillshade(&elevation, 1.0, 30.0).unwrap();
-
-                    for i in 0..hillshade.height() {
-                        for j in 0..hillshade.width() {
-                            let val = hillshade.get_pixel(i, j).unwrap();
-
-                            hillshade.set_pixel(i, j, 255.0 - val).unwrap();
-                        }
-                    }
-
                     let c =
                         ContourBuilder::new(TILE_SIZE + 2 * PADDING, TILE_SIZE + 2 * PADDING, true);
 
                     let contours_m = if args.lines_m && tile.z() >= 11 {
                         let thresholds =
-                            bounds.get_thresholds(if tile.z() == 11 { 50.0 } else { 10.0 });
+                            bounds.get_thresholds(if tile.z() == 11 { 100.0 } else { 10.0 });
                         if thresholds.is_empty() {
                             Vec::new()
                         } else {
@@ -203,7 +229,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let contours_ft = if args.lines_ft && tile.z() >= 11 {
                         let thresholds = bounds.get_thresholds(if tile.z() == 11 {
-                            200.0 * FEET_TO_METER
+                            400.0 * FEET_TO_METER
                         } else {
                             40.0 * FEET_TO_METER
                         });
@@ -218,6 +244,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     let isobands = if args.hillshading {
+                        let lat = ul(Tile::new(tile.x() as i32, tile.y() as i32, tile.z() as i32)).lat;
+                        let pixel_size = 40075016.686 / (TILE_SIZE as f64) * lat.to_radians().cos() / 2f64.powf(tile.z() as f64);
+                        let mut hillshade = swiss_hillshade(&elevation, 1.0, pixel_size).unwrap();
+
+                        if args.debug {
+                            save_buffer_as_png(&hillshade, &format!("debug/{}_{}_{}_hillshade.png", tile.z(), tile.x(), tile.y())).unwrap();
+                        }
+
+                        for i in 0..hillshade.height() {
+                            for j in 0..hillshade.width() {
+                                let val = hillshade.get_pixel(i, j).unwrap();
+                                hillshade.set_pixel(i, j, 255.0 - val).unwrap();
+                            }
+                        }
+
+                        if args.debug {
+                            let mut classes = vec![0u8; (hillshade.height() * hillshade.width()) as usize];
+                            for i in 0..hillshade.height() {
+                                for j in 0..hillshade.width() {
+                                    classes[(i * hillshade.width() + j) as usize] = get_color(hillshade.get_pixel(i as u64, j as u64).unwrap());
+                                }
+                            }
+                            as_png(classes, hillshade.width() as u32, &format!("debug/{}_{}_{}_classes.png", tile.z(), tile.x(), tile.y())).unwrap();
+                        }
+
                         c
                             .isobands(hillshade.as_slice().unwrap(), &THRESHOLDS)
                             .unwrap()

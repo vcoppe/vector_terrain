@@ -15,7 +15,7 @@ use std::{fs::create_dir_all, sync::{
     atomic::{AtomicU64, Ordering},
 }};
 use std::time::{Duration, Instant};
-use tokio::sync::Semaphore;
+use tokio::sync::mpsc;
 
 use elevation_reader::ElevationReader;
 use tile_encoder::TileEncoder;
@@ -124,43 +124,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &args.input, TILE_SIZE, PADDING, args.min_zoom, args.max_zoom
     ).await?);
 
-    let hillshading_encoder = if args.hillshading {
-        Some(Arc::new(tokio::sync::Mutex::new(TileEncoder::new(
-            "hillshading.pmtiles",
-            TILE_SIZE,
-            PADDING,
-            FEET_TO_METER,
-            true,
-        )?)))
+    // Create channels for each encoder type
+    let (hillshading_tx, hillshading_rx) = mpsc::channel(32);
+    let (contours_m_tx, contours_m_rx) = mpsc::channel(32);
+    let (contours_ft_tx, contours_ft_rx) = mpsc::channel(32);
+
+    // Spawn encoder tasks
+    let hillshading_task = if args.hillshading {
+        Some(tokio::task::spawn_blocking(move || {
+            let mut encoder = TileEncoder::new(
+                "hillshading.pmtiles",
+                TILE_SIZE,
+                PADDING,
+                FEET_TO_METER,
+                true,
+            ).map_err(|e| format!("Failed to create encoder: {}", e))?;
+            let mut rx = hillshading_rx;
+            while let Some((tile, bands)) = rx.blocking_recv() {
+                encoder.encode(tile, &bands)
+                    .map_err(|e| format!("Failed to encode: {}", e))?;
+            }
+            encoder.finalize()
+                .map_err(|e| format!("Failed to finalize: {}", e))?;
+            Ok::<_, String>(())
+        }))
     } else {
         None
     };
 
-    let contours_m_encoder = if args.contours_m {
-        Some(Arc::new(tokio::sync::Mutex::new(TileEncoder::new(
-            "contours_m.pmtiles",
-            TILE_SIZE,
-            PADDING,
-            FEET_TO_METER,
-            false,
-        )?)))
+    let contours_m_task = if args.contours_m {
+        Some(tokio::task::spawn_blocking(move || {
+            let mut encoder = TileEncoder::new(
+                "contours_m.pmtiles",
+                TILE_SIZE,
+                PADDING,
+                FEET_TO_METER,
+                false,
+            ).map_err(|e| format!("Failed to create encoder: {}", e))?;
+            let mut rx = contours_m_rx;
+            while let Some((tile, contours)) = rx.blocking_recv() {
+                encoder.encode(tile, &contours)
+                    .map_err(|e| format!("Failed to encode: {}", e))?;
+            }
+            encoder.finalize()
+                .map_err(|e| format!("Failed to finalize: {}", e))?;
+            Ok::<_, String>(())
+        }))
     } else {
         None
     };
 
-    let contours_ft_encoder = if args.contours_ft {
-        Some(Arc::new(tokio::sync::Mutex::new(TileEncoder::new(
-            "contours_ft.pmtiles",
-            TILE_SIZE,
-            PADDING,
-            FEET_TO_METER,
-            false,
-        )?)))
+    let contours_ft_task = if args.contours_ft {
+        Some(tokio::task::spawn_blocking(move || {
+            let mut encoder = TileEncoder::new(
+                "contours_ft.pmtiles",
+                TILE_SIZE,
+                PADDING,
+                FEET_TO_METER,
+                false,
+            ).map_err(|e| format!("Failed to create encoder: {}", e))?;
+            let mut rx = contours_ft_rx;
+            while let Some((tile, contours)) = rx.blocking_recv() {
+                encoder.encode(tile, &contours)
+                    .map_err(|e| format!("Failed to encode: {}", e))?;
+            }
+            encoder.finalize()
+                .map_err(|e| format!("Failed to finalize: {}", e))?;
+            Ok::<_, String>(())
+        }))
     } else {
         None
     };
-
-    let semaphore = Arc::new(Semaphore::new(args.threads));
 
     let tiles = reader.iter_tiles();
 
@@ -168,15 +202,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| Box::<dyn std::error::Error>::from(e))
         .for_each_concurrent(args.threads, |tile_result| {
             let reader = reader.clone();
-            let hillshading_encoder = hillshading_encoder.clone();
-            let contours_m_encoder = contours_m_encoder.clone();
-            let contours_ft_encoder = contours_ft_encoder.clone();
-            let semaphore = semaphore.clone();
+            let hillshading_tx = hillshading_tx.clone();
+            let contours_m_tx = contours_m_tx.clone();
+            let contours_ft_tx = contours_ft_tx.clone();
             let processed_tiles = processed_tiles.clone();
 
             async move {
-                let permit = semaphore.acquire().await.unwrap();
-
                 let tile = match tile_result {
                     Ok(t) => t,
                     Err(e) => {
@@ -288,40 +319,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .await
                 .unwrap();
 
-                if let Some(encoder) = &hillshading_encoder {
-                    let mut enc: tokio::sync::MutexGuard<'_, TileEncoder> = encoder.lock().await;
-
-                    if let Err(e) = enc.encode(tile, &results.0) {
-                        eprintln!("encode error: {e}");
-                    }
+                // Send results through channels (non-blocking)
+                if args.hillshading {
+                    let _ = hillshading_tx.send((tile, results.0)).await;
                 }
-
-                if let Some(encoder) = &contours_m_encoder {
-                    let mut enc = encoder.lock().await;
-
-                    if let Err(e) = enc.encode(tile, &results.1) {
-                        eprintln!("encode error: {e}");
-                    }
+                if args.contours_m {
+                    let _ = contours_m_tx.send((tile, results.1)).await;
                 }
-
-                if let Some(encoder) = &contours_ft_encoder {
-                    let mut enc = encoder.lock().await;
-
-                    if let Err(e) = enc.encode(tile, &results.2) {
-                        eprintln!("encode error: {e}");
-                    }
+                if args.contours_ft {
+                    let _ = contours_ft_tx.send((tile, results.2)).await;
                 }
 
                 processed_tiles.fetch_add(1, Ordering::Relaxed);
-
-                drop(permit);
             }
         })
         .await;
 
-    for encoder in [hillshading_encoder, contours_m_encoder, contours_ft_encoder] {
-        if let Some(encoder) = encoder {
-            Arc::try_unwrap(encoder).unwrap().into_inner().finalize()?;
+    // Drop senders to signal encoder tasks to finish
+    drop(hillshading_tx);
+    drop(contours_m_tx);
+    drop(contours_ft_tx);
+
+    // Wait for encoder tasks to complete
+    for task in [hillshading_task, contours_m_task, contours_ft_task] {
+        if let Some(t) = task {
+            match t.await {
+                Ok(Ok(())) => {},
+                Ok(Err(e)) => return Err(e.into()),
+                Err(e) => return Err(format!("Encoder task panicked: {}", e).into()),
+            }
         }
     }
 

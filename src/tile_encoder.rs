@@ -49,6 +49,7 @@ pub struct TileEncoder {
     padding: usize,
     feet_to_meter: f64,
     hillshading: bool,
+    metric: bool,
 }
 
 impl Debug for TileEncoder {
@@ -67,6 +68,7 @@ impl TileEncoder {
         padding: usize,
         feet_to_meter: f64,
         hillshading: bool,
+        metric: bool,
     ) -> Result<Self, TileEncoderError> {
         let file = File::create(path)?;
         let writer = PmTilesWriter::new(TileType::Mvt).create(file)?;
@@ -76,6 +78,7 @@ impl TileEncoder {
             padding,
             feet_to_meter,
             hillshading,
+            metric,
         })
     }
 
@@ -91,7 +94,7 @@ impl TileEncoder {
         if self.hillshading {
             self.encode_hillshading(&mut tile, contours, expansion_factor)?;
         } else {
-            self.encode_contours(&mut tile, contours, true, expansion_factor)?;
+            self.encode_contours(&mut tile, contours, expansion_factor)?;
         }
 
         let data = tile.to_bytes()?;
@@ -111,13 +114,12 @@ impl TileEncoder {
         &self,
         tile: &mut Tile,
         contours: &Vec<Contour>,
-        metric: bool,
         expansion_factor: f64,
     ) -> Result<(), TileEncoderError> {
-        let mut layer = tile.create_layer(if metric { "contours_m" } else { "contours_ft" });
+        let mut layer = tile.create_layer(if self.metric { "contours_m" } else { "contours_ft" });
 
         for contour in contours.iter() {
-            let ele = if metric {
+            let ele = if self.metric {
                 contour.threshold()
             } else {
                 (contour.threshold() / self.feet_to_meter).round()

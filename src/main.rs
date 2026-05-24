@@ -138,6 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 PADDING,
                 FEET_TO_METER,
                 true,
+                true,
             ).map_err(|e| format!("Failed to create encoder: {}", e))?;
             let mut rx = hillshading_rx;
             while let Some((tile, bands)) = rx.blocking_recv() {
@@ -160,6 +161,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 PADDING,
                 FEET_TO_METER,
                 false,
+                true,
             ).map_err(|e| format!("Failed to create encoder: {}", e))?;
             let mut rx = contours_m_rx;
             while let Some((tile, contours)) = rx.blocking_recv() {
@@ -181,6 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 TILE_SIZE,
                 PADDING,
                 FEET_TO_METER,
+                false,
                 false,
             ).map_err(|e| format!("Failed to create encoder: {}", e))?;
             let mut rx = contours_ft_rx;
